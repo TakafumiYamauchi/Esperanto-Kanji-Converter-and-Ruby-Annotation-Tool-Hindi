@@ -49,38 +49,61 @@ import streamlit.components.v1 as components
 # 主に裏方処理(ユーティリティ)を提供する仕組みになっています。
 #---------------------------------------------------------------------
 from esp_text_replacement_module import (
-    convert_to_circumflex,     # エスペラントの文字(ĉ等)形式に変換する関数(cx/c^→ĉなど)
-    safe_replace,              # (old→placeholder→new)の段階置換を安全に行う関数
-    import_placeholders,       # プレースホルダ文字列をファイルから読み込む関数
-    apply_ruby_html_header_and_footer  # HTMLのルビ表示用ヘッダ/フッタを付加する関数
+    convert_to_circumflex,
+    safe_replace,
+    import_placeholders,
+    apply_ruby_html_header_and_footer
 )
 from esp_replacement_json_make_module import (
-    convert_to_circumflex,     
-    output_format,             
-    import_placeholders,       
-    capitalize_ruby_and_rt,    
-    process_chunk_for_pre_replacements,  
+    convert_to_circumflex,
+    output_format,
+    import_placeholders,
+    capitalize_ruby_and_rt,
+    process_chunk_for_pre_replacements,
     parallel_build_pre_replacements_dict,
-    remove_redundant_ruby_if_identical  
+    remove_redundant_ruby_if_identical
 )
+
 
 #---------------------------------------------------------------------
 # 以下は動詞接尾辞や特殊接尾辞などを扱うための変数群です。
+# 動詞の活用語尾(as,is,os,usなど)や、接尾辞「an」「on」などのデータを
+# コード下部での処理でまとめて扱うために定義しています。
 #---------------------------------------------------------------------
 
+# 動詞の活用語尾 (例: as,is,os,us など) を表す辞書
+# キーは活用語尾そのもの、バリューも基本的には同じ文字列を入れていますが、
+# 後段で safe_replace() によって(ルビ等)を挿入できるようにしてあります。
 verb_suffix_2l = {
     'as':'as', 'is':'is', 'os':'os', 'us':'us','at':'at','it':'it','ot':'ot',
     'ad':'ad','iĝ':'iĝ','ig':'ig','ant':'ant','int':'int','ont':'ont'
 }
 
+#---------------------------------------------------------------------
+# 例: an, on は後の処理で文字列(漢字)と紐づけるためのサンプルデータ
+# ここではAN, ON としてリストを定義し、末尾が"an"/"on"の単語について、
+# 語根分割(形容詞語尾/名詞語尾として扱うか、接尾辞"an"として扱うかetc)を
+# 判定する際に活用する。後段のコードで優先順位を再設定する処理で参照されます。
+#---------------------------------------------------------------------
 AN=[['dietan', '/diet/an/', '/diet/an'], ['afrikan', '/afrik/an/', '/afrik/an'], ['movadan', '/mov/ad/an/', '/mov/ad/an'], ['akcian', '/akci/an/', '/akci/an'], ['montaran', '/mont/ar/an/', '/mont/ar/an'], ['amerikan', '/amerik/an/', '/amerik/an'], ['regnan', '/regn/an/', '/regn/an'], ['dezertan', '/dezert/an/', '/dezert/an'], ['asocian', '/asoci/an/', '/asoci/an'], ['insulan', '/insul/an/', '/insul/an'], ['azian', '/azi/an/', '/azi/an'], ['ŝtatan', '/ŝtat/an/', '/ŝtat/an'], ['doman', '/dom/an/', '/dom/an'], ['montan', '/mont/an/', '/mont/an'], ['familian', '/famili/an/', '/famili/an'], ['urban', '/urb/an/', '/urb/an'], ['popolan', '/popol/an/', '/popol/an'], ['dekan', '/dekan/', '/dek/an'], ['partian', '/parti/an/', '/parti/an'], ['lokan', '/lok/an/', '/lok/an'], ['ŝipan', '/ŝip/an/', '/ŝip/an'], ['eklezian', '/eklezi/an/', '/eklezi/an'], ['landan', '/land/an/', '/land/an'], ['orientan', '/orient/an/', '/orient/an'], ['lernejan', '/lern/ej/an/', '/lern/ej/an'], ['enlandan', '/en/land/an/', '/en/land/an'], ['kalkan', '/kalkan/', '/kalk/an'], ['estraran', '/estr/ar/an/', '/estr/ar/an'], ['etnan', '/etn/an/', '/etn/an'], ['eŭropan', '/eŭrop/an/', '/eŭrop/an'], ['fazan', '/fazan/', '/faz/an'], ['polican', '/polic/an/', '/polic/an'], ['socian', '/soci/an/', '/soci/an'], ['societan', '/societ/an/', '/societ/an'], ['grupan', '/grup/an/', '/grup/an'], ['ligan', '/lig/an/', '/lig/an'], ['nacian', '/naci/an/', '/naci/an'], ['koran', '/koran/', '/kor/an'], ['religian', '/religi/an/', '/religi/an'], ['kuban', '/kub/an/', '/kub/an'], ['majoran', '/major/an/', '/major/an'], ['nordan', '/nord/an/', '/nord/an'], ['paran', 'paran', '/par/an'], ['parizan', '/pariz/an/', '/pariz/an'], ['parokan', '/parok/an/', '/parok/an'], ['podian', '/podi/an/', '/podi/an'], ['rusian', '/rus/i/an/', '/rus/ian'], ['satan', '/satan/', '/sat/an'], ['sektan', '/sekt/an/', '/sekt/an'], ['senatan', '/senat/an/', '/senat/an'], ['skisman', '/skism/an/', '/skism/an'], ['sudan', 'sudan', '/sud/an'], ['utopian', '/utopi/an/', '/utopi/an'], ['vilaĝan', '/vilaĝ/an/', '/vilaĝ/an'], ['arĝentan', '/arĝent/an/', '/arĝent/an']]
 ON=[['duon', '/du/on/', '/du/on'], ['okon', '/ok/on/', '/ok/on'], ['nombron', '/nombr/on/', '/nombr/on'], ['patron', '/patron/', '/patr/on'], ['karbon', '/karbon/', '/karb/on'], ['ciklon', '/ciklon/', '/cikl/on'], ['aldon', '/al/don/', '/ald/on'], ['balon', '/balon/', '/bal/on'], ['baron', '/baron/', '/bar/on'], ['baston', '/baston/', '/bast/on'], ['magneton', '/magnet/on/', '/magnet/on'], ['beton', 'beton', '/bet/on'], ['bombon', '/bombon/', '/bomb/on'], ['breton', 'breton', '/bret/on'], ['burĝon', '/burĝon/', '/burĝ/on'], ['centon', '/cent/on/', '/cent/on'], ['milon', '/mil/on/', '/mil/on'], ['kanton', '/kanton/', '/kant/on'], ['citron', '/citron/', '/citr/on'], ['platon', 'platon', '/plat/on'], ['dekon', '/dek/on/', '/dek/on'], ['kvaron', '/kvar/on/', '/kvar/on'], ['kvinon', '/kvin/on/', '/kvin/on'], ['seson', '/ses/on/', '/ses/on'], ['trion', '/tri/on/', '/tri/on'], ['karton', '/karton/', '/kart/on'], ['foton', '/fot/on/', '/fot/on'], ['peron', '/peron/', '/per/on'], ['elektron', '/elektr/on/', '/elektr/on'], ['drakon', 'drakon', '/drak/on'], ['mondon', '/mon/don/', '/mond/on'], ['pension', '/pension/', '/pensi/on'], ['ordon', '/ordon/', '/ord/on'], ['eskadron', 'eskadron', '/eskadr/on'], ['senton', '/sen/ton/', '/sent/on'], ['eston', 'eston', '/est/on'], ['fanfaron', '/fanfaron/', '/fanfar/on'], ['feston', '/feston/', '/fest/on'], ['flegmon', 'flegmon', '/flegm/on'], ['fronton', '/fronton/', '/front/on'], ['galon', '/galon/', '/gal/on'], ['mason', '/mason/', '/mas/on'], ['helikon', 'helikon', '/helik/on'], ['kanon', '/kanon/', '/kan/on'], ['kapon', '/kapon/', '/kap/on'], ['kokon', '/kokon/', '/kok/on'], ['kolon', '/kolon/', '/kol/on'], ['komision', '/komision/', '/komisi/on'], ['salon', '/salon/', '/sal/on'], ['ponton', '/ponton/', '/pont/on'], ['koton', '/koton/', '/kot/on'], ['kripton', 'kripton', '/kript/on'], ['kupon', '/kupon/', '/kup/on'], ['lakon', 'lakon', '/lak/on'], ['ludon', '/lu/don/', '/lud/on'], ['melon', '/melon/', '/mel/on'], ['menton', '/menton/', '/ment/on'], ['milion', '/milion/', '/mili/on'], ['milionon', '/milion/on/', '/milion/on'], ['naŭon', '/naŭ/on/', '/naŭ/on'], ['violon', '/violon/', '/viol/on'], ['trombon', '/trombon/', '/tromb/on'], ['senson', '/sen/son/', '/sens/on'], ['sepon', '/sep/on/', '/sep/on'], ['skadron', 'skadron', '/skadr/on'], ['stadion', '/stadion/', '/stadi/on'], ['tetraon', 'tetraon', '/tetra/on'], ['timon', '/timon/', '/tim/on'], ['valon', 'valon', '/val/on']]
 
+# allowed_values は -1 表記などを含む例 (ユーザーが単語を排除したい場合に用いる)
+# たとえば、ユーザーのJSON設定で "['xxx', -1, [...]]" となっていたら、
+# その単語を置換対象から完全に外す、といった処理を行うときに使用される。
 allowed_values = {-1, "-1", "ー１", "ー1", "-１", "－１", "－1"}
 
+#=====================================================================
+# 二文字の語根を扱うためのリスト
+# suffix_2char_roots : 接尾辞 (ad, ag, am, ar など)
+# prefix_2char_roots : 接頭辞 (al, am, av, bo など)
+# standalone_2char_roots : 単体でも語根になる (al, ci, da, de など)
+#=====================================================================
 suffix_2char_roots=['ad', 'ag', 'am', 'ar', 'as', 'at', 'av', 'di', 'ec', 'eg', 'ej', 'em', 'er', 'et', 'id', 'ig', 'il', 'in', 'ir', 'is', 'it', 'lu', 'nj', 'op', 'or', 'os', 'ot', 'ov', 'pi', 'te', 'uj', 'ul', 'um', 'us', 'uz','ĝu','aĵ','iĝ','aĉ','aĝ','ŝu','eĥ']
 prefix_2char_roots=['al', 'am', 'av', 'bo', 'di', 'du', 'ek', 'el', 'en', 'fi', 'ge', 'ir', 'lu', 'ne', 'ok', 'or', 'ov', 'pi', 're', 'te', 'uz','ĝu','aĉ','aĝ','ŝu','eĥ']
 standalone_2char_roots=['al', 'ci', 'da', 'de', 'di', 'do', 'du', 'el', 'en', 'fi', 'ha', 'he', 'ho', 'ia', 'ie', 'io', 'iu', 'ja', 'je', 'ju','ke', 'la', 'li', 'mi', 'ne', 'ni', 'nu', 'ok', 'ol', 'po', 'se', 'si', 've', 'vi','ŭa','aŭ','ĉe','ĝi','ŝi','ĉu']
+
+# an, on は別扱いのため、ここでの二文字リストからは除外されています。
 
 imported_placeholders_for_global_replacement = import_placeholders(
     './Appの运行に使用する各类文件/占位符(placeholders)_$20987$-$499999$_全域替换用.txt'
@@ -99,181 +122,178 @@ with open("./Appの运行に使用する各类文件/Unicode_BMP全范围文字�
 # 1) ページ設定 & タイトル
 #=====================================================================
 st.set_page_config(
-    page_title="एस्पेरान्तो पाठ (汉字) प्रतिस्थापन के लिए JSON फ़ाइल जनरेट करने का उपकरण",
+    page_title="एस्पेरान्तो पाठ (चीनी अक्षर) प्रतिस्थापन के लिए JSON जनरेट टूल",
     layout="wide"
 )
-st.title("एस्पेरान्तो पाठ (汉字) के प्रतिस्थापन के लिए JSON फ़ाइल जनरेट करें")
+st.title("एस्पेरान्तो पाठ का (चीनी अक्षर) प्रतिस्थापन करने के लिए JSON फ़ाइल बनाएँ")
 st.write("---")
 
 #=====================================================================
 # 2) 概要説明 (使い方)
 #=====================================================================
-with st.expander("उपयोग निर्देश खोलें", expanded=True):
+with st.expander("उपयोग हेतु निर्देश (खोलें)", expanded=True):
     st.markdown("""
     #### परिचय
-    इस पेज में, एस्पेरान्तो टेक्स्ट के प्रतिस्थापन (मुख्य पेज में) में  
-    उपयोग होने वाली JSON फ़ाइल (कभी-कभी 50MB तक) को उत्पन्न कर  
-    उसे डाउनलोड किया जा सकता है।
+    इस पृष्ठ पर आप, मुख्य पृष्ठ में एस्पेरान्तो टेक्स्ट प्रतिस्थापन के लिए  
+    आवश्यक JSON फ़ाइल (कभी-कभी आकार 50MB तक) का निर्माण कर सकते हैं  
+    एवं उसे डाउनलोड कर सकते हैं।
 
-    **प्रयोग की विधि**:
-    1. आवश्यक **CSV फ़ाइल** (एस्पेरान्तो शब्दमूल → हिंदी अनुवाद) अपलोड करें या डिफ़ॉल्ट का उपयोग करें।
-    2. आवश्यक होने पर **JSON फ़ाइल** (शब्दमूल विखंडन नियम, प्रतिस्थापित टेक्स्ट इत्यादि) अपलोड करें या डिफ़ॉल्ट का उपयोग करें।
-    3. "प्रत्यास्थापन JSON फ़ाइल जनरेट करें" पर क्लिक करके  
-       जनरेट हुई **प्रत्यास्थापन JSON फ़ाइल** डाउनलोड करें।
+    **उपयोग के चरण**:
+    1. **CSV फ़ाइल** (एस्पेरान्तो शब्दमूल → हिंदी या चीनी अक्षर अनुवाद) अपलोड करें या डिफ़ॉल्ट को चुनें।
+    2. आवश्यक होने पर **JSON फ़ाइल** (शब्दमूल विखंडन नियम, प्रतिस्थापित होने वाला टेक्स्ट इत्यादि) अपलोड करें या डिफ़ॉल्ट चुनें।
+    3. “प्रत्यस्थापन JSON फ़ाइल तैयार करें” बटन दबाएँ और  
+       बनी हुई **प्रत्यस्थापन JSON फ़ाइल** डाउनलोड कर लें।
 
-    नीचे कुछ सैंपल फ़ाइलें दी गई हैं, जिनके प्रारूप वगैरह को  
-    आप参考 कर सकते हैं।
+    नीचे कुछ उदाहरण फ़ाइलें भी उपलब्ध हैं, जिनसे आप फ़ाइलों के प्रारूप के बारे में संदर्भ ले सकते हैं।
     """)
 
 #=====================================================================
 # 3) サンプルファイル一覧 (折りたたみ)
 #=====================================================================
-with st.expander("सैंपल फ़ाइलों की सूची (डाउनलोड)"):
-    st.write("#### सैंपल फ़ाइलों की सूची")
+with st.expander("नमूना फ़ाइलों की सूची (डाउनलोड)"):
+    st.write("#### नमूना फ़ाइलों की सूची")
 
     st.markdown("""
-    **सैंपल CSV 1 (एस्पेरान्तो शब्दमूल - हिंदी अनुवाद एवं रूबी टिप्पणियां)**  
-    प्रति पंक्ति एस्पेरान्तो शब्दमूल और हिंदी अनुवाद/रूबी की संगतता वाली CSV।  
-    इस फ़ॉर्मेट में CSV तैयार करके अपलोड करने पर, यह टूल JSON फ़ाइल जनरेट कर देता है।
+    **नमूना CSV1 (एस्पेरान्तो शब्दमूल – हिंदी अनुवाद व रूबी)**  
+    यह CSV एक पंक्ति में एक एस्पेरान्तो शब्दमूल और उसका हिंदी अनुवाद/रूबी दर्शाता है।  
+    इसे अपलोड करने से प्रतिस्थापन用 JSON तैयार किया जा सकता है।
     """)
     file_path0 = './Appの运行に使用する各类文件/एस्पेरान्तो शब्दमूलों की सूची हिंदी अनुवाद एवं रूबी टिप्पणियों सहित.csv'
     with open(file_path0, "rb") as file:
         st.download_button(
-            label="सैंपल CSV 1 (एस्पेरान्तो शब्दमूल - हिंदी अनुवाद) डाउनलोड करें",
+            label="नमूना CSV1 (एस्पेरान्तो शब्दमूल–हिंदी) डाउनलोड",
             data=file,
-            file_name="एスペラント語根-ヒンディー語訳ルビ対応リスト.csv",
+            file_name="एस्पेरान्तो_शब्दमूल-हिंदी.csv",
             mime="text/csv"
         )
 
     st.markdown("""
-    **सैंपल CSV 2 (एस्पेरान्तो शब्दमूल - 汉字,知乎上的提案 (Mingeo氏))**  
-    एस्पेरान्तो शब्दमूल और 汉字 की संगतता वाली CSV।
+    **नमूना CSV 2 (एस्पेरान्तो शब्दमूल – चीनी अक्षरों की संगतता सूची, श्रीमान् मिंगेओ का प्रस्ताव)**  
     """)
     file_path0 = './Appの运行に使用する各类文件/Mingeo先生版 世界语词根-汉字对应列表.csv'
     with open(file_path0, "rb") as file:
         st.download_button(
-            label="सैंपल CSV 2 (Mingeo氏による 汉字対応リスト) डाउनलोड करें",
+            label="नमूना CSV 2 (श्रीमान् मिंगेओ के चीनी अक्षर संगतता का प्रस्ताव) डाउनलोड करें",
             data=file,
-            file_name="エスペラント語根-汉字対応リスト＿楊氏(Mingeo).csv",
+            file_name="एस्पेरान्तो_शब्दमूल-चीनीअक्षर(Mingeo).csv",
             mime="text/csv"
         )
 
     st.markdown("""
-    **सैंपल CSV 3 (एस्पेरान्तो शब्दमूल - 汉字)**  
+    **नमूना CSV3 (एस्पेरान्तो शब्दमूल – चीनी अक्षर)**  
     """)
     file_path0 = './Appの运行に使用する各类文件/世界语词根-汉字对应列表.csv'
     with open(file_path0, "rb") as file:
         st.download_button(
-            label="सैंपल CSV 3 (एस्पेरान्तो शब्दमूल - 汉字) डाउनलोड करें",
+            label="नमूना CSV3 (एस्पेरान्तो शब्दमूल – चीनी अक्षर) डाउनलोड",
             data=file,
-            file_name="エスペラント語根-汉字対応リスト.csv",
+            file_name="एस्पेरान्तो_शब्दमूल-चीनीअक्षर.csv",
             mime="text/csv"
         )
 
     st.markdown("""
-    **सैंपल JSON 1 (एस्पेरान्तो शब्द विखंडन नियम - उपयोगकर्ता सेटिंग)**  
-    **उपयोग**: एस्पेरान्तो शब्दों को किस तरह विखंडित करना है,  
-    किस बिंदु पर (क्रिया रूपांतरण आदि) प्रतिस्थापन करना है इत्यादि;  
-    सैंपल फ़ाइल के अंदर टिप्पणियों से参考 ले सकते हैं।
+    **नमूना JSON1 (एस्पेरान्तो शब्द विखंडन नियम, उपयोगकर्ता-सेटिंग)**  
+    **उद्देश्य**: इसमें एस्पेरान्तो शब्दों को किस तरह विखंडित करना है,  
+    किस चरण में (क्रिया रूपांतरण आदि) प्रतिस्थापन करना है - इत्यादि निर्धारितできます।
     """)
     json_file_path = './Appの运行に使用する各类文件/世界语单词词根分解方法の使用者自定义设置.json'
     with open(json_file_path, "rb") as file_json:
         st.download_button(
-            label="सैंपल JSON 1 (एस्पेरान्तो शब्द विखंडन नियम) डाउनलोड करें",
+            label="नमूना JSON1 (शब्द विखंडन नियम) डाउनलोड",
             data=file_json,
-            file_name="エスペラント単語語根分解法ユーザー設定.json",
+            file_name="एस्पेरान्तो_शब्दविखंडन_नियम.json",
             mime="application/json"
         )
 
     st.markdown("""
-    **सैंपल JSON 2 (प्रतिस्थापित टेक्स्ट उपयोगकर्ता सेटिंग)**  
-    **उपयोग**: विशिष्ट शब्द के लिए अलग 汉字 या विशेष स्वरूप तय करना हो,  
-    तो यहाँ पर記述できます। (अधिकतर CSV व JSON (विखंडन नियम) से ही काम चल जाता है।)
+    **नमूना JSON2 (प्रतिस्थापन बाद का टेक्स्ट, उपयोगकर्ता-सेटिंग)**  
+    **उद्देश्य**: यदि आप किसी खास शब्द को अलग चीनी अक्षर या अन्य विशेष स्वरूप देना चाहते हैं,
+    तो JSON में記述 कर सकते हैं।
     """)
     json_file_path2 = './Appの运行に使用する各类文件/替换后文字列(汉字)の使用者自定义设置(基本上完全不推荐).json'
     with open(json_file_path2, "rb") as file_json:
         st.download_button(
-            label="सैंपल JSON 2 (प्रतिस्थापित टेक्स्ट उपयोग者設定) डाउनलोड करें",
+            label="नमूना JSON2 (प्रतिस्थापन बाद का टेक्स्ट) डाउनलोड",
             data=file_json,
-            file_name="置換後文字列のユーザー設定.json",
+            file_name="प्रतिस्थापनबाद_टेक्स्ट_सेटिंग.json",
             mime="application/json"
         )
 
     st.markdown("""
-    **सैंपल Excel 1 (14 भाषाओं में एस्पेरान्तो शब्दों के रूबी अनुवाद)**  
-    (日本語, 中文, 한국어, English, Русский, español, italiano, français, Deutsch,
-    العربية, हिन्दी, polski, Tiếng Việt, Bahasa Indonesia)
+    **नमूना Excel1 (14 भाषाओं में एस्पेरान्तो शब्दमूल - व्याख्यात्मक रूबी सूची)**  
+    (जापानी, चीनी, कोरियाई, अंग्रेज़ी, रूसी, स्पेनिश, इटालियन, फ़्रेंच, जर्मन,
+    अरबी, हिंदी, पोलिश, वियतनामी, इंडोनेशियाई)
     """)
     with open('./Appの运行に使用する各类文件/Kreado de rubenaj komentoj en 14 lingvoj (日本語, 中文, 한국어, English, Русский, español, italiano, français, Deutsch, العربية, हिन्दी, polski, Tiếng Việt, Bahasa Indonesia) respondaj al listo de 4736 Esperant.xlsx', "rb") as file:
         st.download_button(
-            label="सैंपल Excel 1 (14 भाषाओं के एस्पेरान्तो शब्दमूल-रूबी対応リスト) डाउनलोड करें",
+            label="नमूना Excel1 (14 भाषाओं में एस्पेरान्तो शब्दमूल रूबी) डाउनलोड",
             data=file,
-            file_name="14言語のエスペラント語根-訳ルビ対応リスト.xlsx",
+            file_name="14_भाषाओं_में_एस्पेरान्तो_शब्दमूल_और_रुबी_टिप्पणियों_की_सूची.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     st.markdown("""
-    **सैंपल Excel 2 (एस्पेरान्तो शब्दमूल - जापानी अनुवाद (習得レベル付き))**  
-    **उपयोग**: अगर आप किसी खास शब्दमूल के लिए जापानी अनुवाद/रूबी जोड़ना चाहते हों,  
-    तो इस एक्सेल से参考 ले सकते हैं (習得レベル भी शामिल)。
+    **नमूना Excel 2 (एस्पेरान्तो शब्दमूल – जापानी अनुवाद एवं रुबी टिप्पणियों की सूची (सीखने का स्तर सहित))**  
+    **उपयोग**: यदि आप किसी शब्दमूल के साथ जापानी अनुवाद या रुबी टिप्पणियाँ (सीखने का स्तर भी जोड़ते हुए) सम्मिलित करना चाहते हैं,  
+    तो इस Excel फ़ाइल से संदर्भ लिया जा सकता है।
     """)
     with open('./Appの运行に使用する各类文件/エスペラント語根-日本語訳ルビ対応リスト(習得レベル付き).xlsx', "rb") as file:
         st.download_button(
-            label="सैंपल Excel 2 (एस्पेरान्तो शब्दमूल - जापानी अनुवाद (習得レベル付き)) डाउनलोड करें",
+            label="नमूना Excel2 (एस्पेरान्तो शब्दमूल - जापानी अनुवाद) डाउनलोड",
             data=file,
-            file_name="エスペラント語根-日本語訳ルビ対応リスト(習得レベル付き).xlsx",
+            file_name="एस्पेरान्तो_शब्दमूल_जापानी_अनुवाद_एवं_सीखने_का_स्तर.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
 st.write("---")
 
 #=====================================================================
-# ユーザーに見せる出力形式選択 (例: HTML形式＿ルビ文字のサイズ調整等)
+# ユーザーに見せる出力形式選択
 #=====================================================================
 options = {
-    'HTML形式＿ルビ文字のサイズ調整': 'HTML格式_Ruby文字_大小调整',
-    'HTML形式＿ルビ文字のサイズ調整（汉字置換）': 'HTML格式_Ruby文字_大小调整_汉字替换',
-    'HTML形式': 'HTML格式',
-    'HTML形式（汉字置換）': 'HTML格式_汉字替换',
-    '括弧形式': '括弧(号)格式',
-    ' 括弧形式（汉字置換）': '括弧(号)格式_汉字替换',
-    '単純な置換': '替换后文字列のみ(仅)保留(简单替换)'
+    'HTML (रूबी फ़ॉन्ट साइज़ समायोजन)': 'HTML格式_Ruby文字_大小调整',
+    'HTML (रूबी फ़ॉन्ट साइज़ + चीनी अक्षर प्रतिस्थापन)': 'HTML格式_Ruby文字_大小调整_汉字替换',
+    'HTML (सामान्य)': 'HTML格式',
+    'HTML (चीनी अक्षर प्रतिस्थापन)': 'HTML格式_汉字替换',
+    'कोष्ठक रूप': '括弧(号)格式',
+    'कोष्ठक रूप (चीनी अक्षर प्रतिस्थापन)': '括弧(号)格式_汉字替换',
+    'सरल प्रतिस्थापन': '替换后文字列のみ(仅)保留(简单替换)'
 }
 
 display_options = list(options.keys())
-selected_display = st.selectbox('आउटपुट फ़ॉर्मेट चुनें:', display_options)
+selected_display = st.selectbox('आउटपुट प्रारूप चुनें:', display_options)
 format_type = options[selected_display]
 
-main_text_list = ['Esperant','lingv', 'pac', 'amik', 'ec']
-ruby_content_list = ['世界语', '语言', '和平', '友', '性质']
+main_text_list = ['Esperant','lingv','pac','amik','ec']
+ruby_content_list = ['世界语','语言','和平','友','性质']
 formatted_text = ''
 for i, item in enumerate(main_text_list):
     formatted_text += output_format(item, ruby_content_list[i], format_type, char_widths_dict)
 
 st.write("---")
-st.markdown("**फ़ॉर्मैट किया हुआ नमूना टेक्स्ट (उदाहरण):**")
+st.markdown("**फ़ॉर्मेट किया गया उदाहरण टेक्स्ट:**")
 components.html(apply_ruby_html_header_and_footer(formatted_text, format_type), height=40, scrolling=False)
 st.write("---")
 
 #=====================================================================
 # ステップ１: CSVファイルを準備 (アップロード or デフォルト)
 #=====================================================================
-st.header("चरण 1: CSV फ़ाइल तैयार करें")
+st.header("चरण 1: CSV फ़ाइल की तैयारी")
 st.markdown(
     """
-### एस्पेरान्तो शब्दमूल और (汉字) अनुवाद वाली **CSV फ़ाइल** चुनें
+### (एस्पेरान्तो शब्दमूल व चीनी अक्षर या हिंदी अनुवाद) वाली **CSV फ़ाइल** चुनें  
 
 ---
     """
 )
 
-csv_choice = st.radio("CSV फ़ाइल के बारे में:", ("अपलोड करें", "डिफ़ॉल्ट फ़ाइल उपयोग करें"))
+csv_choice = st.radio("CSV फ़ाइल कैसे चुनें?", ("CSV अपलोड करें", "डिफ़ॉल्ट फ़ाइल प्रयोग करें"))
 csv_path_default = "./Appの运行に使用する各类文件/एस्पेरान्तो शब्दमूलों की सूची हिंदी अनुवाद एवं रूबी टिप्पणियों सहित.csv"
 
 CSV_data_imported = None
 
-if csv_choice == "अपलोड करें":
-    st.write("कोई भी CSV फ़ाइल अपलोड करें (UTF-8 अनुशंसित).")
+if csv_choice == "CSV अपलोड करें":
+    st.write("अपनी पसंद की CSV फ़ाइल (UTF-8 अनुशंसित) अपलोड करें:")
     uploaded_file = st.file_uploader("CSV फ़ाइल चुनें", type=['csv'])
     if uploaded_file is not None:
         file_contents = uploaded_file.read().decode("utf-8")
@@ -282,74 +302,73 @@ if csv_choice == "अपलोड करें":
         CSV_data_imported = pd.read_csv(csv_buffer, encoding="utf-8", usecols=[0, 1])
         st.success("CSV फ़ाइल सफलतापूर्वक अपलोड की गई!")
     else:
-        st.warning("कोई CSV फ़ाइल अपलोड नहीं की गई।")
+        st.warning("कोई CSV फ़ाइल अपलोड नहीं हुई।")
         st.stop()
 
-elif csv_choice == "डिफ़ॉल्ट फ़ाइल उपयोग करें":
+elif csv_choice == "डिफ़ॉल्ट फ़ाइल प्रयोग करें":
     try:
         with open(csv_path_default, 'r', encoding="utf-8") as file:
             text = file.read()
         converted_text = convert_to_circumflex(text)
         csv_buffer = StringIO(converted_text)
         CSV_data_imported = pd.read_csv(csv_buffer, encoding="utf-8", usecols=[0, 1])
-        st.info("डिफ़ॉल्ट CSV फ़ाइल उपयोग की जाएगी।")
+        st.info("डिफ़ॉल्ट CSV फ़ाइल का उपयोग किया जाएगा।")
     except FileNotFoundError:
-        st.error("डिफ़ॉल्ट CSV फ़ाइल नहीं मिली। प्रोसेस रोक दिया गया।")
+        st.error("डिफ़ॉल्ट CSV फ़ाइल नहीं मिल सकी। प्रक्रिया रोकी जा रही है।")
         st.stop()
 
-st.write("CSV पढ़ाई पूरी हुई। अब आगे बढ़ें।")
+st.write("CSV फ़ाइल लोड पूरी हुई। अब आगे बढ़ें।")
 st.write("---")
 
 #=====================================================================
 # ステップ2: JSONファイル(語根分解法など)を準備
 #=====================================================================
-st.header("चरण 2: JSON फ़ाइल (शब्दमूल विखंडन आदि) तैयार करें")
+st.header("चरण 2: JSON फ़ाइल तैयार करें (शब्दमूल विखंडन इत्यादि)")
 st.markdown("""
-आप **एस्पेरान्तो शब्दमूल के विखंडन नियम** या **अपनी इच्छानुसार प्रतिस्थापित टेक्स्ट**  
-के JSON फ़ाइल को अपलोड कर सकते हैं (या डिफ़ॉल्ट का उपयोग भी कर सकते हैं)।
-सैंपल JSON डाउनलोड करके उसमें अपना संशोधन करें, और यहां अपलोड करें।
+यहाँ आप **एस्पेरान्तो शब्दमूल विखंडन नियम** या **अपनी प्रतिस्थापन सेटिंग**  
+(उपयोगकर्ता-परिभाषित) के JSON फ़ाइल को अपलोड कर सकते हैं, या डिफ़ॉल्ट फ़ाइल चुन सकते हैं।
 """)
 
-json_choice = st.radio("1. एस्पेरान्तो शब्दमूल विखंडन नियम (JSON) का चुनाव:", ("अपलोड करें", "डिफ़ॉल्ट फ़ाइल उपयोग करें"))
+json_choice = st.radio("1) शब्दमूल विखंडन नियम वाली JSON:", ("अपलोड करें", "डिफ़ॉल्ट फ़ाइल"))
 json_path_default = "./Appの运行に使用する各类文件/世界语单词词根分解方法の使用者自定义设置.json"
 custom_stemming_setting_list = None
 
 if json_choice == "अपलोड करें":
-    uploaded_json = st.file_uploader("JSON फ़ाइल अपलोड करें", type=['json'])
+    uploaded_json = st.file_uploader("JSON फ़ाइल अपलोड करें (विखंडन नियम)", type=['json'])
     if uploaded_json is not None:
         custom_stemming_setting_list = json.load(uploaded_json)
-        st.success("JSON फ़ाइल सफलतापूर्वक अपलोड की गई!")
+        st.success("JSON फ़ाइल अपलोड सफल!")
     else:
-        st.warning("कोई JSON फ़ाइल अपलोड नहीं की गई।")
+        st.warning("कोई JSON फ़ाइल अपलोड नहीं हुई।")
         st.stop()
-elif json_choice == "डिफ़ॉल्ट फ़ाइल उपयोग करें":
+elif json_choice == "डिफ़ॉल्ट फ़ाइल":
     try:
         with open(json_path_default, "r", encoding="utf-8") as g:
             custom_stemming_setting_list = json.load(g)
-        st.info("डिफ़ॉल्ट JSON फ़ाइल उपयोग की जाएगी।")
+        st.info("डिफ़ॉल्ट JSON फ़ाइल (विखंडन नियम) का उपयोग किया जाएगा।")
     except FileNotFoundError:
-        st.error("डिफ़ॉल्ट JSON फ़ाइल नहीं मिली।")
+        st.error("डिफ़ॉल्ट JSON फ़ाइल (विखंडन नियम) नहीं मिली।")
         st.stop()
 
-json_choice2 = st.radio("2. प्रतिस्थापित टेक्स्ट के लिए JSON फ़ाइल का चुनाव:", ("अपलोड करें", "डिफ़ॉल्ट फ़ाइल उपयोग करें"))
+json_choice2 = st.radio("2) प्रतिस्थापित होने वाले टेक्स्ट की JSON:", ("अपलोड करें", "डिफ़ॉल्ट फ़ाइल"))
 json_path_default2 = "./Appの运行に使用する各类文件/替换后文字列(汉字)の使用者自定义设置(基本上完全不推荐).json"
 user_replacement_item_setting_list = None
 
 if json_choice2 == "अपलोड करें":
-    uploaded_json = st.file_uploader("JSON फ़ाइल (दूसरी) अपलोड करें", type=['json'])
+    uploaded_json = st.file_uploader("JSON फ़ाइल अपलोड करें (प्रतिस्थापित टेक्स्ट)", type=['json'])
     if uploaded_json is not None:
         user_replacement_item_setting_list = json.load(uploaded_json)
-        st.success("JSON फ़ाइल सफलतापूर्वक अपलोड की गई!")
+        st.success("JSON फ़ाइल अपलोड सफल!")
     else:
-        st.warning("कोई JSON फ़ाइल अपलोड नहीं की गई।")
+        st.warning("कोई JSON फ़ाइल अपलोड नहीं हुई।")
         st.stop()
-elif json_choice2 == "डिफ़ॉल्ट फ़ाइल उपयोग करें":
+elif json_choice2 == "डिफ़ॉल्ट फ़ाइल":
     try:
         with open(json_path_default2, "r", encoding="utf-8") as g:
             user_replacement_item_setting_list = json.load(g)
-        st.info("दूसरी डिफ़ॉल्ट JSON फ़ाइल उपयोग की जाएगी।")
+        st.info("डिफ़ॉल्ट JSON फ़ाइल (प्रतिस्थापन टेक्स्ट) का उपयोग किया जाएगा।")
     except FileNotFoundError:
-        st.error("दूसरी डिफ़ॉल्ट JSON फ़ाइल नहीं मिली।")
+        st.error("डिफ़ॉल्ट JSON फ़ाइल (प्रतिस्थापन टेक्स्ट) नहीं मिली।")
         st.stop()
 
 st.write("---")
@@ -358,19 +377,19 @@ st.write("---")
 # ステップ3: 高度な設定 (並列処理)
 #=====================================================================
 st.header("चरण 3: उन्नत सेटिंग (पैरेलल प्रोसेसिंग)")
-with st.expander("पैरेलल प्रोसेसिंग से संबंधित सेटिंग खोलें"):
+with st.expander("पैरेलल प्रोसेसिंग सेटिंग खोलें"):
     st.write("""
-    यहां आप यह निर्धारित कर सकते हैं कि JSON फ़ाइल जनरेट करते समय  
-    एक साथ कितने प्रोसेस उपयोग किए जाएँ (CPU कोर अधिक होने पर गति बढ़ सकती है)।
+    बड़े डेटा या बहुत-से शब्दमूल हों तो CPU कोर अधिक इस्तेमाल कर  
+    तेज़ी पा सकते हैं। यहाँ प्रोसेसों की संख्या निर्धारित करें।
     """)
 
     use_parallel = st.checkbox("पैरेलल प्रोसेसिंग का प्रयोग करें", value=False)
     num_processes = st.number_input("एक साथ चलने वाले प्रोसेसों की संख्या", min_value=2, max_value=6, value=5, step=1)
 
-st.write("### अंतिम प्रतिस्थापन JSON फ़ाइल का निर्माण (बटन)")
+st.write("### अंतिम प्रतिस्थापन JSON फ़ाइल तैयार करें (बटन)")
 
-if st.button("प्रत्यास्थापन JSON फ़ाइल जनरेट करें"):
-    with st.spinner("JSON फ़ाइल जनरेट हो रही है... कृपया प्रतीक्षा करें."):
+if st.button("प्रत्यस्थापन JSON फ़ाइल तैयार करें"):
+    with st.spinner("JSON फ़ाइल जनरेट हो रही है, कृपया प्रतीक्षा करें..."):
         with open("./Appの运行に使用する各类文件/PEJVO(世界语全部单词列表)'全部'について、词尾(a,i,u,e,o,n等)をcutし、comma(,)で隔てて词性と併せて记录した列表(E_stem_with_Part_Of_Speech_list).json", "r", encoding="utf-8") as g:
             E_stem_with_Part_Of_Speech_list = json.load(g)
 
@@ -436,9 +455,8 @@ if st.button("प्रत्यास्थापन JSON फ़ाइल ज�
                     progress_text.write(f"{current_count}/{total_items} वस्तुओं का प्रसंस्करण जारी...")
 
 
-
-
-
+            progress_bar.progress(100)
+            progress_text.write("प्रोसेसिंग 100% पूरी हुई। (कृपया कुछ सेकंड प्रतीक्षा करें...)")
 
         # 例: 処理上、除外したいキーをここでpopする (domen, teren, posten等)
         keys_to_remove = ['domen', 'teren','posten']
@@ -997,11 +1015,11 @@ if st.button("प्रत्यास्थापन JSON फ़ाइल ज�
 
         # JSON文字列にダンプし、ダウンロードボタンを生成
         download_data = json.dumps(combined_data, ensure_ascii=False, indent=2)
-        st.success("प्रत्यास्थापन लिस्ट का निर्माण सफलतापूर्वक पूरा हुआ!")
+        st.success("प्रतिस्थापन लिस्ट सफलतापूर्वक तैयार!")
 
         st.download_button(
-            label="अंतिम प्रतिस्थापन सूची (3 संयुक्त JSON फ़ाइल) डाउनलोड करें",
+            label="अंतिम प्रतिस्थापन लिस्ट (3 संयुक्त JSON) डाउनलोड",
             data=download_data,
-            file_name="अंतिम_प्रत्यस्थापन_सूची(3_संयुक्त_JSON).json",
+            file_name="अंतिम_प्रतिस्थापन_लिस्ट(3_JSON).json",
             mime='application/json'
         )
